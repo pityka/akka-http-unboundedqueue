@@ -30,48 +30,38 @@ import akka.stream.actor._
 import akka.stream.scaladsl._
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.Http
-import scala.concurrent.Promise
+import akka.util._
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
 
-class HttpQueueWithGraphStageImpl(implicit as: ActorSystem,
-                                  mat: ActorMaterializer)
-    extends Extension {
+import akka.stream.stage.StageLogging
+import akka.stream.SourceShape
+import akka.stream.Graph
+import akka.stream.stage._
+import akka.stream.stage.OutHandler
+import java.util.concurrent.ConcurrentLinkedQueue
 
-  type T = (HttpRequest, Promise[HttpResponse])
-
-  private val qc: QueueControl[T] = UnboundedSourceQueue
-    .fromStage[T]
-    .via(Http().superPool[Promise[HttpResponse]]())
-    .toMat(Sink.foreach({
-      case (t, p) =>
-        p.complete(t)
-    }))(Keep.left)
-    .run()
-
-  def queue(rq: HttpRequest) = {
-    val p = Promise[HttpResponse]()
-    qc.send(rq -> p)
-    p.future
-  }
-
+/** A handle to the queue backing up the Source
+  * created by UnboundedSourceQueue.apply */
+trait QueueControl[T] {
+  def send(t: T): Unit
+  def close: Unit
 }
 
-/** Akka extension providing a simple to use HttpRequest => Future[HttpResponse]
-  *
-  * Http().singleRequest may overflow the connection pool,
-  * while this keeps queueing up requests in an unbounded queue before sending
-  * them to the connection pool.
-  */
-object HttpQueueWithGraphStage
-    extends ExtensionId[HttpQueueWithGraphStageImpl]
-    with ExtensionIdProvider {
+object UnboundedSourceQueue {
 
-  override def lookup = HttpQueue
-  override def createExtension(system: ExtendedActorSystem) = {
-    implicit val s = system
-    implicit val mat = ActorMaterializer()
-    new HttpQueueWithGraphStageImpl
-  }
+  /** Creates a source that is materialized as a [[QueueControl]]
+    *
+    * The created source is accepts any number of elements cached in an unbounded queue.
+    * It is safe to send elements to the queue from multiple threads.
+    * It is the user's responsibility to track the elements in the pipeline.
+    * There is no guarantee that the elements sent to the queue will be processed.
+    *
+    * The alternative is to use GraphStage
+    */
+  def fromActorPublisher[T] =
+    Source.actorPublisher(Props[UnboundedSourceQueueActor])
 
-  override def get(system: ActorSystem): HttpQueueWithGraphStageImpl =
-    super.get(system)
+ 
 }
