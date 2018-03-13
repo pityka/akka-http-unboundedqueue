@@ -1,8 +1,9 @@
 lazy val commonSettings = Seq(
     organization := "io.github.pityka",
     scalaVersion := "2.11.11",
-    crossScalaVersions := Seq("2.12.2","2.11.11"),
-    version := "1.1.0"
+    crossScalaVersions := Seq("2.12.4","2.11.11"),
+    version := "1.1.0",
+    scalacOptions ++= Seq("-deprecation")
   ) //++ reformatOnCompileSettings
 
 lazy val root = (project in file("."))
@@ -15,6 +16,7 @@ lazy val root = (project in file("."))
       "com.typesafe.akka" %% "akka-stream" % "2.5.11",
       "com.typesafe.akka" %% "akka-http-core" % "10.1.0"),
     licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
+    publishTo := sonatypePublishTo.value,
     pomExtra in Global := {
       <url>https://pityka.github.io/nspl/</url>
       <scm>
