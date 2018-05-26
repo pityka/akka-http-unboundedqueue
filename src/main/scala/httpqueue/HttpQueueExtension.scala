@@ -29,6 +29,7 @@ import akka.stream._
 import akka.stream.actor._
 import akka.stream.scaladsl._
 import akka.http.scaladsl.model._
+import akka.http.javadsl.model.Host
 import akka.http.scaladsl.Http
 import scala.concurrent.Promise
 
@@ -37,16 +38,31 @@ class HttpQueueImpl(implicit as: ActorSystem, mat: ActorMaterializer)
 
   type T = (HttpRequest, Promise[HttpResponse])
 
-  private val ac: ActorRef = UnboundedSourceQueue
+  private val hostPools = scala.collection.concurrent.TrieMap[(String,Host,Int),ActorRef]()
+
+  private val logger = akka.event.Logging(as,getClass)
+
+  private def createQueue(scheme:String,host:Host,port:Int): ActorRef = {    
+    logger.debug(s"Creating http connection queue to $scheme://${host.address}:$port")
+    UnboundedSourceQueue
     .fromActorPublisher[T]
-    .via(Http().superPool[Promise[HttpResponse]]())
+    .via(
+        if (scheme =="https") 
+          Http().cachedHostConnectionPoolHttps[Promise[HttpResponse]](host.address,port)
+        else 
+          Http().cachedHostConnectionPool[Promise[HttpResponse]](host.address,port)
+      )
     .toMat(Sink.foreach({
       case (t, p) =>
         p.complete(t)
     }))(Keep.left)
-    .run()
+    .run()}
 
   def queue(rq: HttpRequest) = {
+    val host = rq.uri.authority.host
+    val scheme = rq.uri.scheme
+    val port = rq.uri.effectivePort
+    val ac = hostPools.getOrElseUpdate((scheme,host,port),createQueue(scheme,host,port))
     val p = Promise[HttpResponse]()
     ac ! rq -> p
     p.future
